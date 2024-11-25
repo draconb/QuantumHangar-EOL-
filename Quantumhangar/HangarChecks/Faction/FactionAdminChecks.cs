@@ -80,6 +80,9 @@ public class FactionAdminChecks
         if (_faction == null) return false;
         var id = _faction.Members.First().Key;
         var sid = MySession.Static.Players.TryGetSteamId(id);
+        // Prevents exception when faction is led by NPC.
+        if (sid == 0) return false;
+
         FactionsHanger = new FactionHanger(sid, new Chat(_ctx));
         return true;
     }
@@ -119,7 +122,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 
@@ -135,7 +138,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 
@@ -193,7 +196,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 
@@ -207,7 +210,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 
@@ -222,7 +225,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 
@@ -244,7 +247,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 
@@ -277,6 +280,9 @@ public class FactionAdminChecks
                 _ctx.Player!.GetPosition())) return;
 
         var sid = MySession.Static.Players.TryGetSteamId(_faction.Members.First().Key);
+        // Prevents exception when faction is led by NPC.
+        if (sid == 0) _chat?.Respond("Faction seems to be led by a NPC!");
+
         var spawner = new ParallelSpawner(myObjectBuilderCubeGrids, _chat, sid, SpawnedGridsSuccessful);
         spawner.setBounds(stamp.BoundingBox, stamp.Box, stamp.MatrixTranslation);
 
@@ -295,7 +301,7 @@ public class FactionAdminChecks
     {
         if (!InitHangar(_tag))
         {
-            _chat?.Respond("That faction does not exist!");
+            _chat?.Respond("Invalid Faction! Make sure the faction exists, and that it is not led by a NPC.");
             return;
         }
 

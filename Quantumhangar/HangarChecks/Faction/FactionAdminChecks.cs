@@ -281,7 +281,7 @@ public class FactionAdminChecks
 
         var sid = MySession.Static.Players.TryGetSteamId(_faction.Members.First().Key);
         // Prevents exception when faction is led by NPC.
-        if (sid == 0) _chat?.Respond("Faction seems to be led by a NPC!");
+        if (sid == 0) return;
 
         var spawner = new ParallelSpawner(myObjectBuilderCubeGrids, _chat, sid, SpawnedGridsSuccessful);
         spawner.setBounds(stamp.BoundingBox, stamp.Box, stamp.MatrixTranslation);

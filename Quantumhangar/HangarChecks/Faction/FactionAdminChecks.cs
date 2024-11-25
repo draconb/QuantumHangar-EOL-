@@ -1,377 +1,365 @@
-﻿using NLog;
-using QuantumHangar.HangarMarket;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using NLog;
 using QuantumHangar.Utils;
 using Sandbox.Game.Entities;
-using Sandbox.Game.Entities.Blocks;
 using Sandbox.Game.Entities.Character;
-using Sandbox.Game.GameSystems;
-using Sandbox.Game.GameSystems.BankingAndCurrency;
 using Sandbox.Game.World;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Torch.Commands;
 using VRage.Game;
-using VRage.Game.Entity;
 using VRage.Game.ModAPI;
 using VRageMath;
 using static QuantumHangar.Utils.CharacterUtilities;
 
-namespace QuantumHangar.HangarChecks
+namespace QuantumHangar.HangarChecks;
+
+/// <summary>
+///     Class responsible for performing various administrative checks and operations for factions.
+/// </summary>
+public class FactionAdminChecks
 {
-    //This is when a normal player runs hangar commands
-    public class FactionAdminChecks
+    static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    Chat _chat;
+    CommandContext _ctx;
+    MyFaction _faction;
+    string _tag;
+
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="FactionAdminChecks" /> class with a faction tag.
+    /// </summary>
+    /// <param name="tag">The faction tag.</param>
+    /// <param name="ctx">The command context.</param>
+    public FactionAdminChecks(string tag, CommandContext ctx)
     {
-        public MyFaction Faction;
+        Initialize(ctx);
+        _tag = tag;
+    }
 
-        public Chat _chat;
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="FactionAdminChecks" /> class without a faction tag.
+    /// </summary>
+    /// <param name="ctx">The command context.</param>
+    public FactionAdminChecks(CommandContext ctx)
+    {
+        Initialize(ctx);
+    }
 
-        public CommandContext ctx;
+    FactionHanger FactionsHanger { get; set; }
+    static Settings Config => Hangar.Config;
 
-        public string tag;
+    /// <summary>
+    ///     Initializes the command context and chat.
+    /// </summary>
+    /// <param name="ctx">The command context.</param>
+    void Initialize(CommandContext ctx)
+    {
+        var inConsole = TryGetAdminPosition(ctx.Player);
+        _chat = new Chat(ctx, inConsole);
+        _ctx = ctx;
+    }
 
-        private FactionHanger FactionsHanger { get; set; }
+    /// <summary>
+    ///     Checks if the admin position is valid.
+    /// </summary>
+    /// <param name="admin">The admin player.</param>
+    /// <returns>True if the admin position is invalid, otherwise false.</returns>
+    bool TryGetAdminPosition(IMyPlayer admin)
+    {
+        return admin?.GetPosition() == null;
+    }
 
-        public static Settings Config => Hangar.Config;
-        private readonly bool _inConsole;
-        private Vector3D _adminPlayerPosition;
-        private MyCharacter _adminUserCharacter;
+    /// <summary>
+    ///     Initializes the hangar for the specified faction tag.
+    /// </summary>
+    /// <param name="tag">The faction tag.</param>
+    /// <returns>True if the hangar was successfully initialized, otherwise false.</returns>
+    bool InitHangar(string tag)
+    {
+        _faction = MySession.Static.Factions.TryGetFactionByTag(tag);
+        if (_faction == null) return false;
+        var id = _faction.Members.First().Key;
+        var sid = MySession.Static.Players.TryGetSteamId(id);
+        FactionsHanger = new FactionHanger(sid, new Chat(_ctx));
+        return true;
+    }
 
-        
-
-
-        // PlayerChecks as initiated by another server to call LoadGrid.
-        // We don't have a command context nor a player character object to work with,
-        // but we receive all required data in the Nexus message.
-        public FactionAdminChecks(string tag, CommandContext ctx)
+    /// <summary>
+    ///     Performs the main checks required before executing any faction operations.
+    /// </summary>
+    /// <returns>True if all checks pass, otherwise false.</returns>
+    bool PerformMainChecks()
+    {
+        if (!Config.PluginEnabled)
         {
-            _inConsole = TryGetAdminPosition(ctx.Player);
-            this.tag = tag;
-            _chat = new Chat(ctx, _inConsole);
-            this.ctx = ctx;
-        }
-
-        public FactionAdminChecks(CommandContext ctx)
-        {
-            _inConsole = TryGetAdminPosition(ctx.Player);
-            _chat = new Chat(ctx, _inConsole);
-            this.ctx = ctx;
-        }
-        
-        private bool TryGetAdminPosition(IMyPlayer admin)
-        {
-            if (admin == null)
-                return true;
-
-
-            _adminPlayerPosition = admin.GetPosition();
-            _adminUserCharacter = (MyCharacter)admin.Character;
-
+            _chat?.Respond("Plugin is not enabled!");
             return false;
         }
 
-        public bool initHangar(string tag)
+        if (_faction == null)
         {
-            Faction = MySession.Static.Factions.TryGetFactionByTag(tag);
-            if (Faction == null)
-            {
-                return false;
-            }
-            var id = Faction.Members.First().Key;
-            var sid = MySession.Static.Players.TryGetSteamId(id);
-            FactionsHanger = new FactionHanger(sid, new Chat(ctx));
-            return true;
+            _chat?.Respond("Faction not found!");
+            return false;
         }
 
-        private bool PerformMainChecks(bool isSaving)
+        if (FactionHanger.IsServerSaving(_chat))
         {
-            if (!Config.PluginEnabled)
-            {
-                _chat?.Respond("Plugin is not enabled!");
-                return false;
-            }
-            if (Faction == null)
-            {
-                _chat?.Respond("Faction not found");
-                return false;
-            }
-
-            if (FactionHanger.IsServerSaving(_chat))
-            {
-                _chat?.Respond("Server is saving or is paused!");
-                return false;
-            }
-
-            return true;
-
+            _chat?.Respond("Server is saving or is paused!");
+            return false;
         }
 
-        public async void ChangeWebhook(string webhook)
+        return true;
+    }
+
+    /// <summary>
+    ///     Changes the webhook URL for the faction.
+    /// </summary>
+    /// <param name="webhook">The new webhook URL.</param>
+    public void ChangeWebhook(string webhook)
+    {
+        if (!InitHangar(_tag))
         {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            FactionsHanger.ChangeWebhook(webhook);
-            _chat?.Respond("Webhook changed");
+            _chat?.Respond("That faction does not exist!");
+            return;
         }
 
-        public async void ChangeWhitelist(string targetNameOrSteamId)
+        FactionsHanger.ChangeWebhook(webhook);
+        _chat?.Respond("Webhook changed.");
+    }
+
+    /// <summary>
+    ///     Changes the whitelist status of a player.
+    /// </summary>
+    /// <param name="targetNameOrSteamId">The target player's name or Steam ID.</param>
+    public void ChangeWhitelist(string targetNameOrSteamId)
+    {
+        if (!InitHangar(_tag))
         {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            if (TryGetPlayerSteamId(targetNameOrSteamId, _chat, out ulong steamId))
-            {
-                var result = FactionsHanger.ChangeWhitelist(steamId);
-                if (result)
-                {
-                    _chat?.Respond("Player added to whitelist.");
-                    return;
-                }
-                _chat?.Respond("Player removed from whitelist.");
-            }
-            else
-            {
-                _chat?.Respond("Couldn't find that player.");
-            }
-        }
-        
-        private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-
-        public async void SaveGrid(string name)
-        {
-            
-            var result = new GridResult(true);
-            //Gets grids player is looking at
-            if (!result.GetGrids(_chat, (MyCharacter)ctx.Player?.Character, name))
-                return;
-            
-            if (result.OwnerSteamId == 0)
-            {
-                _chat?.Respond("Unable to get major grid owner!");
-                return;
-            }
-
-            Faction = MySession.Static.Factions.GetPlayerFaction(result.BiggestOwner);
-            FactionsHanger = new FactionHanger(result.OwnerSteamId, _chat, true);
-            
-            if (!PerformMainChecks(true))
-                return;
-
-            //Calculates incoming grids data
-            var gridData = result.GenerateGridStamp();
-
-
-
-            //Checks for single and all slot block and grid limits
-            
-
-            FactionsHanger.SelectedFactionFile.FormatGridName(gridData);
-
-            var val = await FactionsHanger.SaveGridsToFile(result, gridData.GridName, Faction.Members.First().Key);
-            if (val)
-            {
-                FactionsHanger.SaveGridStamp(gridData);
-                _chat?.Respond("Save Complete!");
-                FactionsHanger.SendWebHookMessage($"Admin saved grid {gridData.GridName}");
-            }
-            else
-            {
-                _chat?.Respond("Saved Failed!");
-            }
-        }
-        
-        public void ListWhitelist()
-        {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            FactionsHanger.ListAllWhitelisted();
-        }
-        
-        public void ListGrids()
-        {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            FactionsHanger.ListAllGrids();
+            _chat?.Respond("That faction does not exist!");
+            return;
         }
 
-        public void DetailedInfo(string input)
+        if (TryGetPlayerSteamId(targetNameOrSteamId, _chat, out var steamId))
         {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            if (!FactionsHanger.ParseInput(input, out var id))
-            {
-                _chat.Respond($"Grid {input} could not be found!");
-                return;
-            }
+            var result = FactionsHanger.ChangeWhitelist(steamId);
+            _chat?.Respond(result ? "Player added to whitelist." : "Player removed from whitelist.");
+        }
+        else
+        {
+            _chat?.Respond("Couldn't find that player!");
+        }
+    }
 
-            FactionsHanger.DetailedReport(id);
+    /// <summary>
+    ///     Saves the specified grid.
+    /// </summary>
+    /// <param name="name">The name of the grid.</param>
+    public async Task SaveGrid(string name)
+    {
+        var result = new GridResult(true);
+        if (!result.GetGrids(_chat, (MyCharacter)_ctx.Player?.Character, name)) return;
+
+        if (result.OwnerSteamId == 0)
+        {
+            _chat?.Respond("Unable to get major grid owner!");
+            return;
         }
 
-        public async void LoadGrid(string input, bool loadNearPlayer)
+        _faction = MySession.Static.Factions.GetPlayerFaction(result.BiggestOwner);
+        FactionsHanger = new FactionHanger(result.OwnerSteamId, _chat, true);
+
+        if (!PerformMainChecks()) return;
+
+        var gridData = result.GenerateGridStamp();
+        FactionsHanger.SelectedFactionFile.FormatGridName(gridData);
+
+        var val = await FactionsHanger.SaveGridsToFile(result, gridData.GridName, _faction.Members.First().Key);
+        if (val)
         {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            if (!PerformMainChecks(false))
-                return;
+            FactionsHanger.SaveGridStamp(gridData);
+            _chat?.Respond("Save Complete!");
+            FactionsHanger.SendWebHookMessage($"Admin saved grid {gridData.GridName}");
+        }
+        else
+        {
+            _chat?.Respond("Saved Failed!");
+        }
+    }
 
-
-            if (!FactionsHanger.ParseInput(input, out var id))
-            {
-                _chat.Respond($"Grid {input} could not be found!");
-                return;
-            }
-
-
-            if (!FactionsHanger.TryGetGridStamp(id, out var stamp))
-                return;
-            
-
-
-            if (!FactionsHanger.LoadGrid(stamp, out var grids, Faction.Members.First().Key))
-            {
-                Log.Error($"Loading grid {id} failed for Admin!");
-                _chat.Respond("Loading grid failed! Report this to staff and check logs for more info!");
-                return;
-            }
-
-            var myObjectBuilderCubeGrids = grids as MyObjectBuilder_CubeGrid[] ?? grids.ToArray();
-            
-
-            PluginDependencies.BackupGrid(myObjectBuilderCubeGrids.ToList(), Faction.Members.First().Key);
-
-
-            var pos = ctx.Player?.Character?.GetPosition();
-            
-            var spawnPos = DetermineSpawnPosition(stamp.GridSavePosition, pos.GetValueOrDefault(), out var keepOriginalPosition,
-                loadNearPlayer);
-            
-
-            if (PluginDependencies.NexusInstalled && Config.NexusApi &&
-                NexusSupport.RelayLoadIfNecessary(spawnPos, id, loadNearPlayer, _chat, ctx.Player!.SteamUserId, Faction.Members.First().Key,
-                    ctx.Player!.GetPosition()))
-                return;
-            var sid = MySession.Static.Players.TryGetSteamId(Faction.Members.First().Key);
-            var spawner = new ParallelSpawner(myObjectBuilderCubeGrids, _chat, sid, SpawnedGridsSuccessful);
-            spawner.setBounds(stamp.BoundingBox, stamp.Box, stamp.MatrixTranslation);
-
-            Log.Info("Attempting Grid Spawning @" + spawnPos.ToString());
-            if (spawner.Start(spawnPos, keepOriginalPosition))
-            {
-                _chat?.Respond("Spawning Complete!");
-                FactionsHanger.RemoveGridStamp(id);
-                FactionsHanger.SendWebHookMessage("Admin loaded grid {stamp.GridName}");
-            }
-            else
-            {
-                //_chat?.Respond("An error occured while spawning the grid!");
-            }
+    /// <summary>
+    ///     Lists all whitelisted players for the faction.
+    /// </summary>
+    public void ListWhitelist()
+    {
+        if (!InitHangar(_tag))
+        {
+            _chat?.Respond("That faction does not exist!");
+            return;
         }
 
-        public void SellGrid(int id, long price, string description)
+        FactionsHanger.ListAllWhitelisted();
+    }
+
+    /// <summary>
+    ///     Lists all grids for the faction.
+    /// </summary>
+    public void ListGrids()
+    {
+        if (!InitHangar(_tag))
         {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            if (!FactionsHanger.TryGetGridStamp(id, out var stamp))
-                return;
-
-            //Check to see if grid is already for sale
-            if (stamp.IsGridForSale())
-            {
-                _chat.Respond("This grid is already for sale!");
-                return;
-            }
-
-
-            if (!FactionsHanger.SellSelectedGrid(stamp, price, description))
-                return;
-
-            _chat.Respond("Grid has been succesfully listed!");
+            _chat?.Respond("That faction does not exist!");
+            return;
         }
 
-        public void RemoveGrid(string input)
-        {
-            if (!initHangar(tag))
-            {
-                _chat?.Respond("that faction does not exist");
-                return;
-            }
-            if (!FactionsHanger.ParseInput(input, out var id))
-            {
-                _chat.Respond($"Grid {input} could not be found!");
-                return;
-            }
+        FactionsHanger.ListAllGrids();
+    }
 
-            if (FactionsHanger.RemoveGridStamp(id))
-                _chat.Respond("Successfully removed grid!");
+    /// <summary>
+    ///     Provides detailed information about a specific grid.
+    /// </summary>
+    /// <param name="input">The grid identifier.</param>
+    public void DetailedInfo(string input)
+    {
+        if (!InitHangar(_tag))
+        {
+            _chat?.Respond("That faction does not exist!");
+            return;
         }
 
-        private void SpawnedGridsSuccessful(HashSet<MyCubeGrid> grids)
+        if (!FactionsHanger.ParseInput(input, out var id))
         {
-            
-            grids.BiggestGrid(out var biggestGrid);
-            
-            if (ctx.Player == null)
-                return;
-            
-            if (biggestGrid != null && ctx.Player?.IdentityId != 0)
-                new GpsSender().SendGps(biggestGrid.PositionComp.GetPosition(), biggestGrid.DisplayName,
-                        ctx.Player.IdentityId);
+            _chat.Respond($"Grid {input} could not be found!");
+            return;
         }
-        
 
-        private static Vector3D DetermineSpawnPosition(Vector3D gridPosition, Vector3D characterPosition,
-            out bool keepOriginalPosition, bool playersSpawnNearPlayer = false)
+        FactionsHanger.DetailedReport(id);
+    }
+
+    /// <summary>
+    ///     Loads a grid for the faction.
+    /// </summary>
+    /// <param name="input">The grid identifier.</param>
+    /// <param name="loadNearPlayer">Whether to load the grid near the player.</param>
+    public void LoadGrid(string input, bool loadNearPlayer)
+    {
+        if (!InitHangar(_tag))
         {
-            switch (Config.LoadType)
-            {
-                //If the ship is loading from where it saved, we want to ignore aligning to gravity. (Needs to attempt to spawn in original position)
-                case LoadType.ForceLoadNearOriginalPosition when gridPosition == Vector3D.Zero:
-                    Log.Info("Grid position is empty!");
-                    keepOriginalPosition = false;
-                    return characterPosition;
-                case LoadType.ForceLoadNearOriginalPosition:
-                    Log.Info("Loading from grid save position!");
-                    keepOriginalPosition = true;
-                    return gridPosition;
-                case LoadType.ForceLoadMearPlayer when characterPosition == Vector3D.Zero:
-                    keepOriginalPosition = true;
-                    return gridPosition;
-                case LoadType.ForceLoadMearPlayer:
-                    keepOriginalPosition = false;
-                    return characterPosition;
-            }
+            _chat?.Respond("That faction does not exist!");
+            return;
+        }
 
-            if (playersSpawnNearPlayer)
-            {
+        if (!PerformMainChecks()) return;
+
+        if (!FactionsHanger.ParseInput(input, out var id))
+        {
+            _chat.Respond($"Grid {input} could not be found!");
+            return;
+        }
+
+        if (!FactionsHanger.TryGetGridStamp(id, out var stamp)) return;
+
+        if (!FactionsHanger.LoadGrid(stamp, out var grids, _faction.Members.First().Key))
+        {
+            Log.Error($"Loading grid {id} failed for Admin!");
+            _chat.Respond("Loading grid failed! Report this to staff and check logs for more info!");
+            return;
+        }
+
+        var myObjectBuilderCubeGrids = grids as MyObjectBuilder_CubeGrid[] ?? grids.ToArray();
+        PluginDependencies.BackupGrid(myObjectBuilderCubeGrids.ToList(), _faction.Members.First().Key);
+
+        var pos = _ctx.Player?.Character?.GetPosition();
+        var spawnPos = DetermineSpawnPosition(stamp.GridSavePosition, pos.GetValueOrDefault(),
+            out var keepOriginalPosition, loadNearPlayer);
+
+        if (PluginDependencies.NexusInstalled && Config.NexusApi && NexusSupport.RelayLoadIfNecessary(spawnPos, id,
+                loadNearPlayer, _chat, _ctx.Player!.SteamUserId, _faction.Members.First().Key,
+                _ctx.Player!.GetPosition())) return;
+
+        var sid = MySession.Static.Players.TryGetSteamId(_faction.Members.First().Key);
+        var spawner = new ParallelSpawner(myObjectBuilderCubeGrids, _chat, sid, SpawnedGridsSuccessful);
+        spawner.setBounds(stamp.BoundingBox, stamp.Box, stamp.MatrixTranslation);
+
+        Log.Info("Attempting Grid Spawning @" + spawnPos);
+        if (!spawner.Start(spawnPos, keepOriginalPosition)) return;
+        _chat?.Respond("Spawning Complete!");
+        FactionsHanger.RemoveGridStamp(id);
+        FactionsHanger.SendWebHookMessage("Admin loaded grid {stamp.GridName}");
+    }
+
+    /// <summary>
+    ///     Removes a grid from the faction.
+    /// </summary>
+    /// <param name="input">The grid identifier.</param>
+    public void RemoveGrid(string input)
+    {
+        if (!InitHangar(_tag))
+        {
+            _chat?.Respond("That faction does not exist!");
+            return;
+        }
+
+        if (!FactionsHanger.ParseInput(input, out var id))
+        {
+            _chat.Respond($"Grid {input} could not be found!");
+            return;
+        }
+
+        if (FactionsHanger.RemoveGridStamp(id))
+            _chat.Respond("Successfully removed grid!");
+    }
+
+    /// <summary>
+    ///     Callback method for successful grid spawning.
+    /// </summary>
+    /// <param name="grids">The set of spawned grids.</param>
+    void SpawnedGridsSuccessful(HashSet<MyCubeGrid> grids)
+    {
+        grids.BiggestGrid(out var biggestGrid);
+
+        if (_ctx.Player == null) return;
+
+        if (biggestGrid != null && _ctx.Player?.IdentityId != 0)
+            new GpsSender().SendGps(biggestGrid.PositionComp.GetPosition(), biggestGrid.DisplayName,
+                _ctx.Player.IdentityId);
+    }
+
+    /// <summary>
+    ///     Determines the spawn position for a grid.
+    /// </summary>
+    /// <param name="gridPosition">The original grid position.</param>
+    /// <param name="characterPosition">The character's position.</param>
+    /// <param name="keepOriginalPosition">Whether to keep the original position.</param>
+    /// <param name="playersSpawnNearPlayer">Whether to spawn near the player.</param>
+    /// <returns>The determined spawn position.</returns>
+    static Vector3D DetermineSpawnPosition(Vector3D gridPosition, Vector3D characterPosition,
+        out bool keepOriginalPosition, bool playersSpawnNearPlayer = false)
+    {
+        switch (Config.LoadType)
+        {
+            case LoadType.ForceLoadNearOriginalPosition when gridPosition == Vector3D.Zero:
+                Log.Info("Grid position is empty!");
                 keepOriginalPosition = false;
                 return characterPosition;
-            }
-            keepOriginalPosition = true;
-            return gridPosition;
+            case LoadType.ForceLoadNearOriginalPosition:
+                Log.Info("Loading from grid save position!");
+                keepOriginalPosition = true;
+                return gridPosition;
+            case LoadType.ForceLoadMearPlayer when characterPosition == Vector3D.Zero:
+                keepOriginalPosition = true;
+                return gridPosition;
+            case LoadType.ForceLoadMearPlayer:
+                keepOriginalPosition = false;
+                return characterPosition;
         }
-        
-        
 
-        
+        if (playersSpawnNearPlayer)
+        {
+            keepOriginalPosition = false;
+            return characterPosition;
+        }
+
+        keepOriginalPosition = true;
+        return gridPosition;
     }
 }
